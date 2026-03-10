@@ -1,0 +1,10 @@
+*
+!.gitignore
+!README.md
+!Main.cs
+!NeverGraveRussian.csproj
+!NeverGraveRussian.json
+!bin
+!bin/Debug
+!bin/Debug/net6.0
+!bin/Debug/net6.0/NeverGraveRussian.dll
