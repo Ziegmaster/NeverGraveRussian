@@ -27,7 +27,7 @@ namespace NeverGraveRussian
         private static readonly Regex HasEnglishLetters = new Regex(@"[a-zA-Z]", RegexOptions.Compiled);
         private static readonly Regex AutoSizePattern = new Regex(@"\[AUTO_SIZE:?.*?\]\]|\[AUTO_SIZE\]", RegexOptions.Compiled);
         private static readonly Regex AlterWidthPattern = new Regex(@"\[ALTER_WIDTH:.*?\]\]", RegexOptions.Compiled);
-        private static readonly Regex MarginPattern = new Regex(@"\[MARGIN_(?<side>LEFT|RIGHT|UP|DOWN):.*?\]\]", RegexOptions.Compiled);
+        private static readonly Regex MarginPattern = new Regex(@"\[MARGIN_(?<side>X|Y):.*?\]\]", RegexOptions.Compiled);
         private static readonly Regex ExtractPath = new Regex(@"\[PATH=(?<val>[^\]]+)\]", RegexOptions.Compiled);
         private static readonly Regex ExtractDepth = new Regex(@"\[DEPTH=(?<val>\d+)\]", RegexOptions.Compiled);
         private static readonly Regex ExtractDelta = new Regex(@"\[DELTA=(?<val>[\+\-]\d+)\]", RegexOptions.Compiled);
@@ -198,10 +198,8 @@ namespace NeverGraveRussian
                 Vector2 pos = rect.anchoredPosition;
                 switch (side)
                 {
-                    case "LEFT": pos.x += delta; break;
-                    case "RIGHT": pos.x -= delta; break;
-                    case "UP": pos.y += delta; break;
-                    case "DOWN": pos.y -= delta; break;
+                    case "X": pos.x += delta; break;
+                    case "Y": pos.x += delta; break;
                 }
                 rect.anchoredPosition = pos;
             } catch { }
