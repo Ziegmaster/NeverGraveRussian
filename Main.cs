@@ -5,7 +5,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NeverGraveRussian.MyMod), "Never Grave Russian", "1.2.0", "Ziegmaster")]
+[assembly: MelonInfo(typeof(NeverGraveRussian.MyMod), "Never Grave Russian", "1.3.0", "Ziegmaster")]
 [assembly: MelonGame(null, null)]
 
 namespace NeverGraveRussian
