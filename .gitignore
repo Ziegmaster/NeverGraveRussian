@@ -2,5 +2,11 @@
 !.gitignore
 !README.md
 !Main.cs
+!Dumper.cs
 !NeverGraveRussian.csproj
 !NeverGraveRussian.json
+!NeverGraveDumper.csproj
+!NeverGraveDumper.json
+!NeverGraveMods.sln
+!doc
+!doc/*

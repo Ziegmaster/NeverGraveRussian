@@ -3,12 +3,12 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>NeverGraveRussian</AssemblyName>
+    <AssemblyName>NeverGraveDumper</AssemblyName>
     <GamePath>C:\Program Files (x86)\Steam\steamapps\common\NeverGrave</GamePath>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Dumper.cs" />
+    <Compile Remove="Main.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,20 +21,14 @@
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(GamePath)\MelonLoader\Il2CppAssemblies\UnityEngine.CoreModule.dll</HintPath>
     </Reference>
-    <Reference Include="UnityEngine.UI">
-      <HintPath>$(GamePath)\MelonLoader\Il2CppAssemblies\UnityEngine.UI.dll</HintPath>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(GamePath)\MelonLoader\Il2CppAssemblies\UnityEngine.InputLegacyModule.dll</HintPath>
     </Reference>
     <Reference Include="Il2CppInterop.Runtime">
       <HintPath>$(GamePath)\MelonLoader\net6\Il2CppInterop.Runtime.dll</HintPath>
     </Reference>
     <Reference Include="Il2Cppmscorlib">
       <HintPath>$(GamePath)\MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
-    </Reference>
-    <Reference Include="0Harmony">
-      <HintPath>$(GamePath)\MelonLoader\net6\0Harmony.dll</HintPath>
-    </Reference>
-    <Reference Include="Unity.TextMeshPro">
-      <HintPath>$(GamePath)\MelonLoader\Il2CppAssemblies\Unity.TextMeshPro.dll</HintPath>
     </Reference>
   </ItemGroup>
   <PropertyGroup>
@@ -45,9 +39,7 @@
     <MakeDir Directories="$(ModsFolder)" Condition="!Exists('$(ModsFolder)')" />
     <ItemGroup>
       <_BuiltDll Include="$(TargetDir)$(TargetFileName)" />
-      <_JsonFile Include="$(ProjectDir)NeverGraveRussian.json" Condition="Exists('$(ProjectDir)NeverGraveRussian.json')" />
     </ItemGroup>
     <Copy SourceFiles="@(_BuiltDll)" DestinationFolder="$(ModsFolder)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_JsonFile)" DestinationFolder="$(ModsFolder)" SkipUnchangedFiles="true" />
   </Target>
 </Project>
