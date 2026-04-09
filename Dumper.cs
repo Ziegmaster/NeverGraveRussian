@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NeverGraveDumper.DumperMod), "Never Grave Dumper", "1.6.0", "Ziegmaster")]
+[assembly: MelonInfo(typeof(NeverGraveDumper.DumperMod), "Never Grave Dumper", "1.6.1", "Ziegmaster")]
 [assembly: MelonGame(null, null)]
 
 namespace NeverGraveDumper

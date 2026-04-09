@@ -11,7 +11,7 @@ using System;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-[assembly: MelonInfo(typeof(NeverGraveRussian.MyMod), "Never Grave Russian", "1.6.0", "Ziegmaster")]
+[assembly: MelonInfo(typeof(NeverGraveRussian.MyMod), "Never Grave Russian", "1.6.1", "Ziegmaster")]
 [assembly: MelonGame(null, null)]
 
 namespace NeverGraveRussian
