@@ -15,3 +15,5 @@ https://store.steampowered.com/app/2395770/Never_Grave_The_Witch_and_The_Curse/
 # Обратная связь
 
 Через Issues здесь, либо заходите на [Сервер Discord](https://discord.gg/pe6JcQrWCH).
+Прикрепляйте скриншоты / файл NeverGraveUntranslated.json с последней актуальной версии мода.
+Файл находится в той же папке, куда вы устанавливали сам мод.
