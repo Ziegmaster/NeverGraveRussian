@@ -11,7 +11,7 @@ using System;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-[assembly: MelonInfo(typeof(NeverGraveRussian.MyMod), "Never Grave Russian", "1.6.2", "Ziegmaster")]
+[assembly: MelonInfo(typeof(NeverGraveRussian.MyMod), "Never Grave Russian", "1.7.0", "Ziegmaster")]
 [assembly: MelonGame(null, null)]
 
 namespace NeverGraveRussian
@@ -24,6 +24,8 @@ namespace NeverGraveRussian
         private static readonly string JsonPath = Path.Combine(Directory.GetCurrentDirectory(), "Mods", "NeverGraveRussian.json");
         private static string UntranslatedJsonPath = string.Empty;
         private static string CurrentVersion = "1.0.0";
+        private static Dictionary<string, string> UntranslatedCache = new Dictionary<string, string>();
+        private static bool HasLoadedUntranslated = false;
 
         // Структура для хранения шаблонов с {WILDCARD}
         // Используется для переводов, которые содержат динамические части, не поддающиеся простой нормализации.
@@ -37,6 +39,7 @@ namespace NeverGraveRussian
         // Регулярные выражения для извлечения тегов, чисел и плейсхолдеров
         private static readonly Regex SmartRegex = new Regex(@"<[^>]+>|\{[^}]+\}|\d+", RegexOptions.Compiled);
         private static readonly Regex HasEnglishLetters = new Regex(@"[a-zA-Z]", RegexOptions.Compiled);
+        private static readonly Regex HasCyrillic = new Regex(@"[А-Яа-яЁё]", RegexOptions.Compiled);
         private static readonly object FileLock = new object();
         private static HashSet<int> patchedComponents = new HashSet<int>();
         
@@ -46,6 +49,84 @@ namespace NeverGraveRussian
             public float width;
         }
         private static Dictionary<int, OriginalRectData> originalRects = new Dictionary<int, OriginalRectData>();
+
+        // Кэш для предотвращения повторной настройки одних и тех же шрифтов
+        private static HashSet<int> _patchedFonts = new HashSet<int>();
+
+        /// <summary>
+        /// Расширяет размер текстур атласа шрифтов для поддержки большого количества символов.
+        /// Фикс: Позволяет встроенному шрифту рендерить русский язык без появления "квадратов" (переполнение атласа).
+        /// </summary>
+        public static void EnsureFontAtlasCapacity(object? __instance)
+        {
+            if (__instance == null) return;
+
+            try
+            {
+                Type type = __instance.GetType();
+                var fontProp = type.GetProperty("font", BindingFlags.Public | BindingFlags.Instance);
+                if (fontProp == null) return;
+
+                object? originalFont = fontProp.GetValue(__instance);
+                if (originalFont == null) return;
+
+                int fontId = originalFont.GetHashCode();
+                if (_patchedFonts.Contains(fontId)) return;
+
+                // Увеличиваем размер текстуры и включаем поддержку мультиатласов для основного шрифта
+                PatchFontCapacity(originalFont);
+
+                Type fontType = originalFont.GetType();
+                var fallbackTableProp = fontType.GetProperty("fallbackFontAssetTable", BindingFlags.Public | BindingFlags.Instance);
+                if (fallbackTableProp != null)
+                {
+                    object? fallbackList = fallbackTableProp.GetValue(originalFont);
+                    if (fallbackList != null)
+                    {
+                        var countProp = fallbackList.GetType().GetProperty("Count");
+                        var itemProp = fallbackList.GetType().GetProperty("Item");
+                        
+                        if (countProp != null && itemProp != null)
+                        {
+                            object? countObj = countProp.GetValue(fallbackList);
+                            int count = countObj != null ? (int)countObj : 0;
+                            for (int i = 0; i < count; i++)
+                            {
+                                object? fallback = itemProp.GetValue(fallbackList, new object[] { i });
+                                if (fallback != null) PatchFontCapacity(fallback);
+                            }
+                        }
+                    }
+                }
+                
+                // Заставляем текстовый компонент обновить геометрию (важно для немедленного исчезновения квадратов)
+                var setAllDirty = type.GetMethod("SetAllDirty");
+                if (setAllDirty != null) setAllDirty.Invoke(__instance, null);
+
+                _patchedFonts.Add(fontId);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Включает Dynamic модификацию атласа для шрифта и поддержку дополнительных атласов (MultiAtlas).
+        /// Оставляет оригинальные закэшированные символы (цифры, латиницу) нетронутыми,
+        /// что предотвращает потерю стилей, жирности, раскраски шрифтов и зависания при переходе между сценами.
+        /// </summary>
+        private static void PatchFontCapacity(object fontObj)
+        {
+            try
+            {
+                Type fontType = fontObj.GetType();
+
+                var atlasPopProp = fontType.GetProperty("atlasPopulationMode", BindingFlags.Public | BindingFlags.Instance);
+                if (atlasPopProp != null) atlasPopProp.SetValue(fontObj, 1); // 1 = Dynamic
+
+                var multiAtlasProp = fontType.GetProperty("isMultiAtlasTexturesEnabled", BindingFlags.Public | BindingFlags.Instance);
+                if (multiAtlasProp != null) multiAtlasProp.SetValue(fontObj, true);
+            }
+            catch { }
+        }
 
         public override void OnInitializeMelon()
         {
@@ -63,24 +144,72 @@ namespace NeverGraveRussian
             var harmony = HarmonyInstance;
             try
             {
-                Type? tmpType = null;
+                Type? tmpTextType = null;
+                Type? tmpTextUGUIType = null;
+                Type? tmpTextWorldType = null;
+                Type? unityTextType = null;
+
                 foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    tmpType = assembly.GetType("TMPro.TMP_Text") ?? assembly.GetType("Il2CppTMPro.TMP_Text");
-                    if (tmpType != null) break;
+                    if (tmpTextType == null) tmpTextType = assembly.GetType("TMPro.TMP_Text") ?? assembly.GetType("Il2CppTMPro.TMP_Text");
+                    if (tmpTextUGUIType == null) tmpTextUGUIType = assembly.GetType("TMPro.TextMeshProUGUI") ?? assembly.GetType("Il2CppTMPro.TextMeshProUGUI");
+                    if (tmpTextWorldType == null) tmpTextWorldType = assembly.GetType("TMPro.TextMeshPro") ?? assembly.GetType("Il2CppTMPro.TextMeshPro");
+                    if (unityTextType == null) unityTextType = assembly.GetType("UnityEngine.UI.Text");
+                    
+                    if (tmpTextType != null && unityTextType != null && tmpTextUGUIType != null && tmpTextWorldType != null) break;
                 }
-                if (tmpType != null)
+
+                var prefix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(UniversalPrefix)));
+                var postfix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(UniversalPostfix)));
+                var onEnablePostfix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(OnEnablePostfix)));
+                var sbPrefix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(Prefix_StringBuilder)));
+                var charPrefix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(Prefix_CharArray)));
+
+                // Patch TMP_Text and its child classes directly
+                Type[] tmproTypes = new Type?[] { tmpTextType, tmpTextUGUIType, tmpTextWorldType }.Where(t => t != null).Cast<Type>().ToArray();
+                foreach (Type t in tmproTypes)
                 {
-                    var prefix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(UniversalPrefix)));
-                    var postfix = new HarmonyMethod(typeof(MyMod).GetMethod(nameof(UniversalPostfix)));
-                    var textSetter = tmpType.GetProperty("text", BindingFlags.Public | BindingFlags.Instance)?.GetSetMethod();
-                    if (textSetter != null) harmony.Patch(textSetter, prefix: prefix, postfix: postfix);
-                    var methods = tmpType.GetMethods(BindingFlags.Public | BindingFlags.Instance);
+                    var textSetter = t.GetProperty("text", BindingFlags.Public | BindingFlags.Instance)?.GetSetMethod();
+                    if (textSetter != null && textSetter.DeclaringType == t) harmony.Patch(textSetter, prefix: prefix, postfix: postfix);
+
+                    var methods = t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     foreach (var m in methods)
                     {
-                        if (m.Name == "SetText" && m.GetParameters().Length > 0 && m.GetParameters()[0].ParameterType == typeof(string))
+                        if (m.DeclaringType != t) continue;
+                        
+                        var p = m.GetParameters();
+                        if (m.Name == "SetText" && p.Length > 0 && p[0].ParameterType == typeof(string))
                         {
                             harmony.Patch(m, prefix: prefix, postfix: postfix);
+                        }
+                        else if (m.Name == "SetText" && p.Length > 0 && p[0].ParameterType.Name == "StringBuilder")
+                        {
+                            harmony.Patch(m, prefix: sbPrefix, postfix: postfix);
+                        }
+                        else if (m.Name == "SetCharArray" && p.Length > 0 && p[0].ParameterType == typeof(char[]))
+                        {
+                            harmony.Patch(m, prefix: charPrefix, postfix: postfix);
+                        }
+                        else if ((m.Name == "OnEnable" || m.Name == "Awake" || m.Name == "Start") && p.Length == 0)
+                        {
+                            harmony.Patch(m, postfix: onEnablePostfix);
+                        }
+                    }
+                }
+
+                // Patch Unity standard Text if exists
+                if (unityTextType != null)
+                {
+                    var uTextSetter = unityTextType.GetProperty("text", BindingFlags.Public | BindingFlags.Instance)?.GetSetMethod();
+                    if (uTextSetter != null && uTextSetter.DeclaringType == unityTextType) harmony.Patch(uTextSetter, prefix: prefix, postfix: postfix);
+
+                    var methods = unityTextType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    foreach (var m in methods)
+                    {
+                        if (m.DeclaringType != unityTextType) continue;
+                        if ((m.Name == "OnEnable" || m.Name == "Awake" || m.Name == "Start") && m.GetParameters().Length == 0)
+                        {
+                            harmony.Patch(m, postfix: onEnablePostfix);
                         }
                     }
                 }
@@ -88,12 +217,157 @@ namespace NeverGraveRussian
             catch { }
         }
 
+        /// <summary>
+        /// Postfix для методов инициализации UI компонентов.
+        /// Вызывается при OnEnable, Awake, Start и обновляет переводы.
+        /// </summary>
+        public static void OnEnablePostfix(object? __instance)
+        {
+            if (__instance == null) return;
+            EnsureFontAtlasCapacity(__instance);
+            try
+            {
+                var t = __instance.GetType();
+                var textProp = t.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+                if (textProp == null) return;
+
+                string currentText = textProp.GetValue(__instance) as string ?? "";
+                if (string.IsNullOrEmpty(currentText) || currentText.Length < 2) return;
+
+                if (HasCyrillic.IsMatch(currentText)) return;
+
+                string cleanValue = currentText.Replace('\u00A0', ' ').Trim();
+                if (!HasEnglishLetters.IsMatch(cleanValue)) return;
+
+                string keyForDict = cleanValue;
+                string[]? dynamicParts = null;
+                
+                var matches = SmartRegex.Matches(cleanValue);
+                if (matches.Count > 0)
+                {
+                    string template = cleanValue;
+                    dynamicParts = new string[matches.Count];
+                    for (int i = matches.Count - 1; i >= 0; i--)
+                    {
+                        var m = matches[i];
+                        dynamicParts[i] = m.Value;
+                        template = template.Remove(m.Index, m.Length).Insert(m.Index, $"{{{i}}}");
+                    }
+                    keyForDict = template;
+                }
+
+                string? translated = FindTranslationWithWildcard(keyForDict, out List<string>? capturedValues);
+
+                if (!string.IsNullOrWhiteSpace(translated))
+                {
+                    string result = translated;
+                    if (capturedValues != null && capturedValues.Count > 0)
+                    {
+                        int wildcardIndex = 0;
+                        result = Regex.Replace(result, @"\{WILDCARD\}", m =>
+                        {
+                            if (wildcardIndex < capturedValues.Count)
+                                return capturedValues[wildcardIndex++];
+                            else
+                                return m.Value;
+                        });
+                    }
+
+                    string finalStr = (dynamicParts != null) ? string.Format(result, dynamicParts) : result;
+                    textProp.SetValue(__instance, finalStr);
+                }
+                else
+                {
+                    AddNewKeyToJson(keyForDict);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Prefix для метода SetCharArray.
+        /// Перехватывает текст, устанавливаемый как массив символов, и заменяет на перевод.
+        /// </summary>
+        public static void Prefix_CharArray(object? __instance, char[] __0)
+        {
+            if (__0 == null || __0.Length < 2) return;
+            EnsureFontAtlasCapacity(__instance);
+            string currentText = new string(__0);
+            if (string.IsNullOrEmpty(currentText) || currentText.Length < 2) return;
+            if (HasCyrillic.IsMatch(currentText)) return;
+            
+            string cleanValue = currentText.Replace('\u00A0', ' ').Trim();
+            if (!HasEnglishLetters.IsMatch(cleanValue)) return;
+            
+            string keyForDict = cleanValue;
+            string? translated = FindTranslationWithWildcard(keyForDict, out _);
+            
+            if (!string.IsNullOrWhiteSpace(translated))
+            {
+                // Для SetCharArray мы не можем изменить длину массива, поэтому просто вызовем обычный SetText
+                try
+                {
+                    var t = __instance!.GetType();
+                    var textProp = t.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+                    if (textProp != null) textProp.SetValue(__instance, translated);
+                }
+                catch { }
+            }
+            else
+            {
+                AddNewKeyToJson(keyForDict);
+            }
+        }
+
+        /// <summary>
+        /// Prefix для метода SetText(StringBuilder).
+        /// Перехватывает текст из StringBuilder и подменяет на переведенную строку.
+        /// </summary>
+        public static void Prefix_StringBuilder(object? __instance, object __0)
+        {
+            if (__0 == null) return;
+            EnsureFontAtlasCapacity(__instance);
+            string currentText = __0.ToString() ?? "";
+            if (string.IsNullOrEmpty(currentText) || currentText.Length < 2) return;
+            if (HasCyrillic.IsMatch(currentText)) return;
+            
+            string cleanValue = currentText.Replace('\u00A0', ' ').Trim();
+            if (!HasEnglishLetters.IsMatch(cleanValue)) return;
+            
+            string keyForDict = cleanValue;
+            string? translated = FindTranslationWithWildcard(keyForDict, out _);
+            
+            if (!string.IsNullOrWhiteSpace(translated))
+            {
+                // Для StringBuilder мы не можем легко изменить ref, поэтому очистим и добавим
+                var sbType = __0.GetType();
+                var clearMethod = sbType.GetMethod("Clear");
+                var appendMethod = sbType.GetMethod("Append", new[] { typeof(string) });
+                if (clearMethod != null && appendMethod != null)
+                {
+                    clearMethod.Invoke(__0, null);
+                    appendMethod.Invoke(__0, new object[] { translated });
+                }
+            }
+            else
+            {
+                AddNewKeyToJson(keyForDict);
+            }
+        }
+
+        /// <summary>
+        /// Основной метод-перехватчик (Prefix), который вызывается перед установкой string текста в UI-компонент.
+        /// Здесь происходит замена английского текста на русский и извлечение динамических переменных.
+        /// </summary>
         public static void UniversalPrefix(object? __instance, ref string __0)
         {
-            // Основной метод-перехватчик (Prefix), который вызывается перед установкой текста в UI-компонент.
-            // Здесь происходит замена английского текста на русский.
+            EnsureFontAtlasCapacity(__instance);
             if (string.IsNullOrEmpty(__0) || __0.Length < 2) return;
             string cleanValue = __0.Replace('\u00A0', ' ').Trim();
+            
+            // Если текст уже содержит русские буквы, пропускаем логику словаря
+            if (HasCyrillic.IsMatch(cleanValue)) return;
+
             string keyForDict = cleanValue;
             string[]? dynamicParts = null;
             
@@ -382,6 +656,19 @@ namespace NeverGraveRussian
             // Поиск перевода (точное совпадение или по шаблону с WILDCARD)
             string? translated = FindTranslationWithWildcard(keyForDict, out List<string>? capturedValues);
 
+            // --- ЛОГИРОВАНИЕ НЕПЕРЕВЕДЕННЫХ СТРОК ---
+            // Если точного совпадения в словаре нет, либо оно пустое - мы добавляем это в файл непереведенных строк.
+            // Даже если строка была перехвачена через {WILDCARD}, мы все равно добавим оригинальную строку
+            // для возможного индивидуального перевода.
+            bool hasExact = TextTranslations.TryGetValue(keyForDict, out string? exactVal);
+            if (!hasExact || string.IsNullOrWhiteSpace(exactVal))
+            {
+                if (HasEnglishLetters.IsMatch(cleanValue))
+                {
+                    AddNewKeyToJson(keyForDict);
+                }
+            }
+
             if (__instance is MonoBehaviour comp)
             {
                 // Патчим специфичные UI элементы
@@ -414,11 +701,6 @@ namespace NeverGraveRussian
                 {
                     __0 = result;
                 }
-            }
-            else if (!TextTranslations.ContainsKey(keyForDict) && HasEnglishLetters.IsMatch(cleanValue))
-            {
-                // Если перевод не найден и текст содержит буквы, сохраняем его для будущего перевода
-                AddNewKeyToJson(keyForDict);
             }
         }
 
@@ -803,6 +1085,9 @@ namespace NeverGraveRussian
             return null;
         }
 
+        /// <summary>
+        /// Очищает старые JSON-файлы с непереведенным текстом, чтобы они не переполняли папку Mods при обновлениях.
+        /// </summary>
         private static void CleanupOldUntranslatedFiles()
         {
             try
@@ -856,6 +1141,9 @@ namespace NeverGraveRussian
             }
         }
 
+        /// <summary>
+        /// Возвращает путь элемента управления в иерархии Unity (от корня сцены до компонента).
+        /// </summary>
         private static string GetHierarchyPath(MonoBehaviour comp)
         {
             // Возвращает полный путь объекта в иерархии (например, Canvas>Panel>Text)
@@ -1183,19 +1471,25 @@ namespace NeverGraveRussian
             // Добавление ненайденной строки в JSON-файл непереведенного текста
             lock (FileLock)
             {
-                Dictionary<string, string> untranslated = new Dictionary<string, string>();
-                if (File.Exists(UntranslatedJsonPath))
+                if (!HasLoadedUntranslated)
                 {
-                    try
+                    if (File.Exists(UntranslatedJsonPath))
                     {
-                        string json = File.ReadAllText(UntranslatedJsonPath);
-                        untranslated = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+                        try
+                        {
+                            string json = File.ReadAllText(UntranslatedJsonPath);
+                            UntranslatedCache = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+                        }
+                        catch
+                        {
+                        }
                     }
-                    catch { }
+                    HasLoadedUntranslated = true;
                 }
-                if (!untranslated.ContainsKey(key))
+                
+                if (!UntranslatedCache.ContainsKey(key))
                 {
-                    untranslated[key] = "";
+                    UntranslatedCache[key] = "";
                     try
                     {
                         var opt = new JsonSerializerOptions
@@ -1203,11 +1497,15 @@ namespace NeverGraveRussian
                             WriteIndented = true,
                             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                         };
-                        File.WriteAllText(UntranslatedJsonPath, JsonSerializer.Serialize(untranslated, opt));
+                        File.WriteAllText(UntranslatedJsonPath, JsonSerializer.Serialize(UntranslatedCache, opt));
                         return true;
                     }
-                    catch { }
+                    catch
+                    {
+                        UntranslatedCache.Remove(key);
+                    }
                 }
+                
                 return false;
             }
         }
